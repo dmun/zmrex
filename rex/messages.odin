@@ -1,4 +1,4 @@
-package main
+package rex
 
 import "core:encoding/json"
 
@@ -13,7 +13,7 @@ Client_Info :: struct {
 Hello :: struct {
 	message_type:     string `json:"type"`,
 	reconnect_token:  string `json:"reconnect_token,omitempty"`,
-	client:           ^Client_Info `json:"client,omitempty"`,
+	client:           Client_Info `json:"client,omitempty"`,
 	api_revision:     int `json:"api_revision,omitempty"`,
 	api_min_revision: int `json:"api_min_revision,omitempty"`,
 }
@@ -39,7 +39,7 @@ Welcome :: struct {
 	protocol:            string `json:"protocol"`,
 	limits:              Welcome_Limits `json:"limits"`,
 	carriers:            []Carrier `json:"carriers,omitempty"`,
-	client:              ^Welcome_Client `json:"client,omitempty"`,
+	client:              Welcome_Client `json:"client,omitempty"`,
 	features:            []string `json:"features,omitempty"`,
 	api_revision:        int `json:"api_revision,omitempty"`,
 	api_server_revision: int `json:"api_server_revision,omitempty"`,
@@ -50,7 +50,7 @@ Request :: struct {
 	message_type: string `json:"type"`,
 	id:           string `json:"id"`,
 	method:       string `json:"method"`,
-	payload:      ^json.Value `json:"payload,omitempty"`,
+	payload:      json.Value `json:"payload,omitempty"`,
 }
 
 Error :: struct {
@@ -63,8 +63,8 @@ Response :: struct {
 	message_type: string `json:"type"`,
 	id:           string `json:"id"`,
 	seq:          int `json:"seq"`,
-	payload:      ^json.Value `json:"payload,omitempty"`,
-	error:        ^Error `json:"error,omitempty"`,
+	payload:      json.Value `json:"payload,omitempty"`,
+	error:        Error `json:"error,omitempty"`,
 }
 
 Event :: struct {
