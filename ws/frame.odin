@@ -127,17 +127,17 @@ read_exact :: proc(sfd: posix.FD, dst: []byte) -> Read_Error {
 	return .None
 }
 
-
-send_text :: proc(sfd: posix.FD, data: []byte) -> posix.Errno {
+send_frame :: proc(sfd: posix.FD, opcode: Opcode, data: []byte) -> posix.Errno {
 	frame := Frame {
 		fin     = true,
-		opcode  = .Text,
+		opcode  = opcode,
 		payload = data,
 	}
 	req := encode_client_frame(frame)
+	defer delete(req)
 
-	log.debug("json (%d): %s", len(data), data)
-	log.debug("header: %02x", req[:2])
+	log.debugf("json (%d): %s", len(data), data)
+	log.debugf("header: %02x", req[:2])
 
 	if posix.send(sfd, raw_data(req), len(req), {}) == -1 {
 		return posix.errno()

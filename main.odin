@@ -1,6 +1,7 @@
 package main
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
@@ -30,14 +31,15 @@ main :: proc() {
 		sock, _ := filepath.join({data_dir, "rex", "server.sock"})
 		copy(addr.sun_path[:], sock)
 	case .Linux:
-		copy(addr.sun_path[:], "/run/user/1000/rex/server.sock\x00")
+		copy(addr.sun_path[:], "/run/user/1000/rex/server.sock")
 	case:
 		log.error("%s Not supported", ODIN_OS)
 		os.exit(1)
 	}
 
 	// Perform handshake
-	if err := ws.handshake(sfd, (^posix.sockaddr)(&addr), size_of(addr), "rex.control.v1"); err != nil {
+	if err := ws.handshake(sfd, (^posix.sockaddr)(&addr), size_of(addr), "rex.control.v1");
+	   err != nil {
 		switch e in err {
 		case posix.Errno:
 			log.error(posix.strerror(e))
@@ -66,7 +68,7 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	if err := ws.send_text(sfd, data); err != nil {
+	if err := ws.send_frame(sfd, .Text, data); err != nil {
 		log.error(posix.strerror(err))
 		os.exit(1)
 	}
@@ -76,6 +78,30 @@ main :: proc() {
 
 	for {
 		frame := ws.read_server_frame(sfd, &buf) or_break
-		log.debug("%s", string(frame.payload))
+
+		switch frame.opcode {
+		case .Text:
+			message, err := rex.decode_message(frame.payload)
+			if err != nil {
+				log.error("failed to parse payload:", string(frame.payload))
+				continue
+			}
+			log.debug(message)
+			switch m in message {
+			case rex.Response:
+			case rex.Event:
+			case rex.Welcome:
+			}
+		case .Continuation:
+		case .Binary:
+		case .Close:
+			log.debug("Closed")
+			break
+		case .Ping:
+			if err := ws.send_frame(sfd, .Pong, frame.payload); err != nil {
+				log.error(posix.strerror(posix.errno()))
+			}
+		case .Pong:
+		}
 	}
 }

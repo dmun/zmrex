@@ -1,6 +1,13 @@
 package rex
 
 import "core:encoding/json"
+import "core:log"
+
+Message :: union {
+	Event,
+	Response,
+	Welcome,
+}
 
 Client_Info :: struct {
 	kind:     string `json:"kind,omitempty"`,
@@ -35,7 +42,7 @@ Carrier :: struct {
 }
 
 Welcome :: struct {
-	message_type:        string `json:"type"`,
+	// message_type:        string `json:"type"`,
 	protocol:            string `json:"protocol"`,
 	limits:              Welcome_Limits `json:"limits"`,
 	carriers:            []Carrier `json:"carriers,omitempty"`,
@@ -47,10 +54,10 @@ Welcome :: struct {
 }
 
 Request :: struct {
-	message_type: string `json:"type"`,
-	id:           string `json:"id"`,
-	method:       string `json:"method"`,
-	payload:      json.Value `json:"payload,omitempty"`,
+	// message_type: string `json:"type"`,
+	id:      string `json:"id"`,
+	method:  string `json:"method"`,
+	payload: json.Value `json:"payload,omitempty"`,
 }
 
 Error :: struct {
@@ -60,15 +67,47 @@ Error :: struct {
 }
 
 Response :: struct {
-	message_type: string `json:"type"`,
-	id:           string `json:"id"`,
-	seq:          int `json:"seq"`,
-	payload:      json.Value `json:"payload,omitempty"`,
-	error:        Error `json:"error,omitempty"`,
+	id:      string `json:"id"`,
+	seq:     int `json:"seq"`,
+	payload: json.Value `json:"payload,omitempty"`,
+	error:   Error `json:"error,omitempty"`,
 }
 
 Event :: struct {
-	message_type: string `json:"type"`,
-	seq:          int `json:"seq"`,
-	payload:      json.Value `json:"payload"`,
+	// message_type: string `json:"type"`,
+	seq:     int `json:"seq"`,
+	payload: json.Value `json:"payload"`,
+}
+
+unmarshal_as :: proc(
+	$T: typeid,
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	msg: Message,
+	err: json.Unmarshal_Error,
+) {
+	v: T
+	json.unmarshal(data, &v, allocator = allocator) or_return
+	return v, nil
+}
+
+decode_message :: proc(data: []byte) -> (msg: Message, err: json.Unmarshal_Error) {
+	Header :: struct {
+		message_type: string `json:"type"`,
+	}
+
+	header: Header
+	json.unmarshal(data, &header) or_return
+
+	switch header.message_type {
+	case "welcome":
+		return unmarshal_as(Welcome, data)
+	case "response":
+		return unmarshal_as(Response, data)
+	case "event":
+		return unmarshal_as(Event, data)
+	}
+
+	return nil, nil
 }
