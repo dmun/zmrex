@@ -3,6 +3,7 @@ package main
 import "core:crypto"
 import "core:crypto/hash"
 import "core:encoding/base64"
+import "core:encoding/endian"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -13,6 +14,68 @@ import "core:sys/posix"
 import "rex"
 
 GUID := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+Opcode :: enum byte {
+	Continuation = 0x0,
+	Text         = 0x1,
+	Binary       = 0x2,
+	Close        = 0x8,
+	Ping         = 0x9,
+	Pong         = 0xA,
+}
+
+Parse_Result :: enum {
+	NeedMore,
+	Ok,
+	Invalid,
+}
+
+Frame :: struct {
+	fin:     bool,
+	opcode:  Opcode,
+	payload: []byte,
+}
+
+encode_client_frame :: proc(f: Frame) -> [dynamic]byte {
+	out: [dynamic]byte
+
+	first := byte(f.opcode)
+	if f.fin {
+		first |= 0b10000000
+	}
+	append(&out, first)
+
+	second := byte(0b10000000)
+	n := len(f.payload)
+	if n <= 125 {
+		second |= byte(n)
+	} else if n <= 65535 {
+		second |= 126
+	} else {
+		second |= 127
+	}
+	append(&out, second)
+
+	if n > 125 && n <= 65535 {
+		length: [2]byte
+		endian.put_u16(length[:], .Big, u16(n))
+		append(&out, ..length[:])
+	} else if n > 65535 {
+		length: [8]byte
+		endian.put_u64(length[:], .Big, u64(n))
+		append(&out, ..length[:])
+	}
+
+	mask: [4]byte
+	crypto.rand_bytes(mask[:])
+	append(&out, ..mask[:])
+
+	for i in 0..<n {
+		append(&out, f.payload[i] ~ mask[i % 4])
+	}
+
+	return out
+}
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -126,9 +189,16 @@ main :: proc() {
 			log.error(err)
 			os.exit(1)
 		}
-		posix.send(sfd, &data, len(data), {})
-	}
 
+		frame := Frame {
+			fin     = true,
+			opcode  = .Text,
+			payload = data,
+		}
+		req := encode_client_frame(frame)
+		fmt.printfln("%08b", req)
+
+	}
 	for {
 		n := posix.recv(sfd, raw_data(buf[:]), len(buf), {})
 		if n == 0 {
