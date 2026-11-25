@@ -1,7 +1,6 @@
 package main
 
 import "core:encoding/json"
-import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
@@ -9,6 +8,82 @@ import "core:sys/posix"
 import "rex"
 import "ws"
 
+Error :: union {
+	posix.Errno,
+	rex.Error,
+	ws.Error,
+	ws.Handshake_Error,
+	json.Marshal_Error,
+	json.Unmarshal_Error,
+}
+
+handle_frame :: proc(sfd: posix.FD, frame: ws.Frame) -> Error {
+	switch frame.opcode {
+	case .Text:
+		message := rex.decode_message(frame.payload) or_return
+		log.debug(message)
+
+		switch m in message {
+		case rex.Response:
+		case rex.Event:
+		case rex.Welcome:
+		}
+	case .Continuation:
+	case .Binary:
+	case .Close:
+		log.debug("Closed")
+		break
+	case .Ping:
+		ws.send_frame(sfd, .Pong, frame.payload) or_return
+	case .Pong:
+	}
+
+	return nil
+}
+
+attach :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_t) -> Error {
+	// Perform handshake
+	ws.handshake(sfd, addr, addr_len, "rex.control.v1") or_return
+
+	// Perform Rex hello
+	client := rex.Client_Info {
+		kind    = "cli",
+		name    = "trex",
+		version = "0.1.0",
+	}
+
+	hello := rex.Hello {
+		message_type = "hello",
+		api_revision = 18,
+		client       = client,
+	}
+
+	data := json.marshal(hello) or_return
+	ws.send_frame(sfd, .Text, data) or_return
+
+	bootstrap := rex.Request(rex.Bootstrap_Payload) {
+		message_type = "request",
+		id = "1",
+		method = "session.bootstrap",
+		payload = {event_scope = "session"},
+	}
+
+	data = json.marshal(bootstrap) or_return
+	ws.send_frame(sfd, .Text, data) or_return
+
+	buf: [dynamic]byte
+	defer delete(buf)
+
+	for {
+		frame := ws.read_server_frame(sfd, &buf) or_break
+		if err := handle_frame(sfd, frame); err != nil {
+			log.error("failed to parse frame:", frame)
+			continue
+		}
+	}
+
+	return nil
+}
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -37,71 +112,13 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	// Perform handshake
-	if err := ws.handshake(sfd, (^posix.sockaddr)(&addr), size_of(addr), "rex.control.v1");
-	   err != nil {
-		switch e in err {
+	if err := attach(sfd, (^posix.sockaddr)(&addr), size_of(addr)); err != nil {
+		#partial switch e in err {
 		case posix.Errno:
 			log.error(posix.strerror(e))
-		case ws.Handshake_Error:
+		case:
 			log.error(e)
 		}
 		os.exit(1)
-	}
-
-	// Perform Rex hello
-	client := rex.Client_Info {
-		kind    = "cli",
-		name    = "trex",
-		version = "0.1.0",
-	}
-
-	hello := rex.Hello {
-		message_type = "hello",
-		api_revision = 18,
-		client       = client,
-	}
-
-	data, err := json.marshal(hello)
-	if err != nil {
-		log.error(err)
-		os.exit(1)
-	}
-
-	if err := ws.send_frame(sfd, .Text, data); err != nil {
-		log.error(posix.strerror(err))
-		os.exit(1)
-	}
-
-	buf: [dynamic]byte
-	defer delete(buf)
-
-	for {
-		frame := ws.read_server_frame(sfd, &buf) or_break
-
-		switch frame.opcode {
-		case .Text:
-			message, err := rex.decode_message(frame.payload)
-			if err != nil {
-				log.error("failed to parse payload:", string(frame.payload))
-				continue
-			}
-			log.debug(message)
-			switch m in message {
-			case rex.Response:
-			case rex.Event:
-			case rex.Welcome:
-			}
-		case .Continuation:
-		case .Binary:
-		case .Close:
-			log.debug("Closed")
-			break
-		case .Ping:
-			if err := ws.send_frame(sfd, .Pong, frame.payload); err != nil {
-				log.error(posix.strerror(posix.errno()))
-			}
-		case .Pong:
-		}
 	}
 }

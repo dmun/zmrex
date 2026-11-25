@@ -53,11 +53,21 @@ Welcome :: struct {
 	api_min_revision:    int `json:"api_min_revision,omitempty"`,
 }
 
-Request :: struct {
-	// message_type: string `json:"type"`,
-	id:      string `json:"id"`,
-	method:  string `json:"method"`,
-	payload: json.Value `json:"payload,omitempty"`,
+Request :: struct($T: typeid) {
+	message_type: string `json:"type"`,
+	id:           string `json:"id"`,
+	method:       string `json:"method"`,
+	payload:      T `json:"payload,omitempty"`,
+}
+
+Bootstrap_Payload :: struct {
+	event_scope:          string `json:"event_scope"`,
+	preferred_session_id: string `json:"preferred_session_id,omitempty"`,
+	attach_session_ids:   []string `json:"attach_session_ids,omitempty"`,
+}
+
+Attach_Payload :: struct {
+	session_id: string `json:"session_id"`,
 }
 
 Error :: struct {
