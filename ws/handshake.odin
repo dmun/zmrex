@@ -5,7 +5,6 @@ import "core:crypto/hash"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:log"
-import "core:os"
 import "core:strings"
 import "core:sys/posix"
 
@@ -22,7 +21,13 @@ Handshake_Error :: enum {
 	Invalid_Accept,
 }
 
-handshake :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_t, url: string, protocol: string) -> Error {
+handshake :: proc(
+	sfd: posix.FD,
+	addr: ^posix.sockaddr,
+	addr_len: posix.socklen_t,
+	url: string,
+	protocol: string,
+) -> Error {
 	log.info("Performing handshake..")
 
 	if posix.connect(sfd, addr, addr_len) != .OK {
@@ -32,7 +37,9 @@ handshake :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_
 	raw: [16]byte
 	crypto.rand_bytes(raw[:])
 	key := base64.encode(raw[:])
-	fmt.println(key)
+	defer delete(key)
+	log.debug("ws key:", key)
+
 	reqbuf: [512]byte
 	req := fmt.bprintf(
 		reqbuf[:],
@@ -49,42 +56,68 @@ handshake :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_
 		protocol,
 	)
 
-	posix.send(sfd, &reqbuf, len(req), {})
+	send_all(sfd, transmute([]byte)req) or_return
 
 	log.info("Receiving..")
 
+	// Read byte-by-byte until "\r\n\r\n" so we never over-read past the HTTP
+	// upgrade headers into the first WebSocket frame.
 	buf: [4096]byte
 	head_len := 0
-	for strings.index(string(buf[:head_len]), "\r\n\r\n") < 0 {
-		n := posix.recv(sfd, raw_data(buf[head_len:]), uint(len(buf) - head_len), {})
-		if n == -1 {
-			err := posix.errno()
-			log.error(posix.strerror(err))
-			os.exit(1)
+	for {
+		if head_len >= len(buf) {
+			return .Invalid_Response
 		}
-		log.debug("%d bytes: %s", n, buf[:n])
+		n := posix.recv(sfd, &buf[head_len], 1, {})
+		if n < 0 {
+			e := posix.errno()
+			if e == .EINTR do continue
+			return e
+		}
+		if n == 0 {
+			return .Closed
+		}
 		head_len += n
+		if head_len >= 4 &&
+			buf[head_len - 4] == '\r' &&
+			buf[head_len - 3] == '\n' &&
+			buf[head_len - 2] == '\r' &&
+			buf[head_len - 1] == '\n' {
+			break
+		}
 	}
 
 	lines := strings.split(string(buf[:head_len]), "\r\n")
+	defer delete(lines)
+
+	accepted := false
 	for line in lines[1:] {
 		sep := strings.index(line, ":")
-		if sep == -1 {continue}
+		if sep == -1 do continue
 
 		name := strings.trim_space(line[:sep])
 		value := strings.trim_space(line[sep + 1:])
 
 		if strings.equal_fold(name, "Sec-Websocket-Accept") {
 			input := strings.concatenate({key, GUID})
+			defer delete(input)
 			digest := hash.hash_string(.Insecure_SHA1, input)
+			defer delete(digest)
+			expected := base64.encode(digest)
+			defer delete(expected)
 
-			if base64.encode(digest) != value {
-				log.error("Handshake failed")
-				os.exit(1)
+			if expected != value {
+				log.error("Handshake failed: invalid Sec-WebSocket-Accept")
+				return .Invalid_Accept
 			}
 
+			accepted = true
 			log.info("Handshake succeeded")
 		}
+	}
+
+	if !accepted {
+		return .Invalid_Response
 	}
 
 	return nil

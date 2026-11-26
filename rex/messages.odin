@@ -77,6 +77,68 @@ Attach_Payload :: struct {
 	session_id: string `json:"session_id"`,
 }
 
+Key_Event :: struct {
+	key:                 string `json:"key"`,
+	mods:                string `json:"mods"`,
+	consumed_mods:       string `json:"consumed_mods"`,
+	text:                string `json:"text"`,
+	unshifted_codepoint: int    `json:"unshifted_codepoint"`,
+	composing:           bool   `json:"composing"`,
+	action:              string `json:"action"`,
+}
+
+Client_Key_Payload :: struct {
+	session_id: string    `json:"session_id"`,
+	key:        Key_Event `json:"key"`,
+	block_id:   string    `json:"block_id,omitempty"`,
+	prefix:     []string  `json:"prefix,omitempty"`,
+}
+
+Own_Block_Payload :: struct {
+	session_id: string   `json:"session_id"`,
+	block_ids:  []string `json:"block_ids,omitempty"`,
+	mode:       string   `json:"mode,omitempty"`,
+}
+
+Session_View_Payload :: struct {
+	session_id: string `json:"session_id"`,
+}
+
+Data_Connect_Payload :: struct {
+	session_id:  string `json:"session_id"`,
+	block_id:    string `json:"block_id"`,
+	data_ref_id: string `json:"data_ref_id"`,
+	subprotocol: string `json:"subprotocol,omitempty"`,
+}
+
+Block_Method_Payload :: struct($T: typeid) {
+	session_id: string `json:"session_id"`,
+	block_id:   string `json:"block_id"`,
+	args:       T      `json:"args"`,
+}
+
+Terminal_Resize_Args :: struct {
+	columns: int `json:"columns"`,
+	rows:    int `json:"rows"`,
+}
+
+Terminal_Format_Args :: struct {
+	format:                 string `json:"format,omitempty"`,
+	extra_charsets:         bool   `json:"extra_charsets,omitempty"`,
+	extra_cursor:           bool   `json:"extra_cursor,omitempty"`,
+	extra_modes:            bool   `json:"extra_modes,omitempty"`,
+	extra_scrolling_region: bool   `json:"extra_scrolling_region,omitempty"`,
+	extra_style:            bool   `json:"extra_style,omitempty"`,
+	extra_tabstops:         bool   `json:"extra_tabstops,omitempty"`,
+	max_bytes:              int    `json:"max_bytes,omitempty"`,
+}
+
+Terminal_Blob_Read_Args :: struct {
+	id:        int `json:"id"`,
+	offset:    int `json:"offset"`,
+	max_bytes: int `json:"max_bytes,omitempty"`,
+}
+
 Error :: struct {
 	code:    string `json:"code"`,
 	message: string `json:"message"`,

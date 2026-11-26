@@ -77,15 +77,24 @@ encode_client_frame :: proc(f: Frame) -> [dynamic]byte {
 	return out
 }
 
-read_server_frame :: proc(sfd: posix.FD, buf: ^[dynamic]byte) -> (frame: Frame, err: Read_Error) {
+read_raw_frame :: proc(
+	sfd: posix.FD,
+	buf: ^[dynamic]byte,
+	append_mode: bool,
+) -> (
+	fin: bool,
+	opcode: Opcode,
+	start: int,
+	err: Read_Error,
+) {
 	header: [2]byte
 	read_exact(sfd, header[:]) or_return
 
 	first := header[0]
 	second := header[1]
 
-	fin := (first & 0b1000_0000) != 0
-	opcode := Opcode(first & 0b0000_1111)
+	fin = (first & 0b1000_0000) != 0
+	opcode = Opcode(first & 0b0000_1111)
 
 	length: u64
 	length_code := uint(second & 0b0111_1111)
@@ -103,28 +112,86 @@ read_server_frame :: proc(sfd: posix.FD, buf: ^[dynamic]byte) -> (frame: Frame, 
 		length = endian.unchecked_get_u64be(ext[:])
 	}
 
-	resize(buf, length)
-	read_exact(sfd, buf[:]) or_return
+	if append_mode {
+		start = len(buf^)
+		resize(buf, start + int(length))
+	} else {
+		start = 0
+		resize(buf, int(length))
+	}
+	read_exact(sfd, buf[start:]) or_return
+	return fin, opcode, start, .None
+}
 
-	frame = Frame {
-		fin     = fin,
-		opcode  = opcode,
-		payload = buf[:],
+// Reads a complete WebSocket message, reassembling fragmented continuation frames
+// and responding to interleaved Ping frames automatically.
+read_server_frame :: proc(sfd: posix.FD, buf: ^[dynamic]byte) -> (frame: Frame, err: Read_Error) {
+	fin, opcode, _, rerr := read_raw_frame(sfd, buf, false)
+	if rerr != .None {
+		return {}, rerr
 	}
 
-	return frame, .None
+	if fin || opcode == .Close || opcode == .Ping || opcode == .Pong {
+		return Frame{fin = fin, opcode = opcode, payload = buf[:]}, .None
+	}
+
+	// Reassemble fragmented Text/Binary message.
+	ctrl_buf: [dynamic]byte
+	defer delete(ctrl_buf)
+
+	for !fin {
+		cfin, cop, _, cerr := read_raw_frame(sfd, &ctrl_buf, false)
+		if cerr != .None {
+			return {}, cerr
+		}
+
+		#partial switch cop {
+		case .Continuation:
+			append(buf, ..ctrl_buf[:])
+			fin = cfin
+		case .Ping:
+			_ = send_frame(sfd, .Pong, ctrl_buf[:])
+		case .Pong:
+		case .Close:
+			clear(buf)
+			append(buf, ..ctrl_buf[:])
+			return Frame{fin = true, opcode = .Close, payload = buf[:]}, .None
+		case:
+			return {}, .Invalid_Frame
+		}
+	}
+
+	return Frame{fin = true, opcode = opcode, payload = buf[:]}, .None
 }
 
 read_exact :: proc(sfd: posix.FD, dst: []byte) -> Read_Error {
 	offset: uint
 	for offset < len(dst) {
 		n := posix.recv(sfd, raw_data(dst[offset:]), len(dst) - offset, {})
-		if n <= 0 {
+		if n < 0 {
+			if posix.errno() == .EINTR do continue
+			return .IO_Error
+		}
+		if n == 0 {
 			return .Closed
 		}
 		offset += uint(n)
 	}
 	return .None
+}
+
+send_all :: proc(sfd: posix.FD, data: []byte) -> posix.Errno {
+	offset: uint
+	for offset < len(data) {
+		n := posix.send(sfd, raw_data(data[offset:]), len(data) - offset, {})
+		if n < 0 {
+			e := posix.errno()
+			if e == .EINTR do continue
+			return e
+		}
+		offset += uint(n)
+	}
+	return .NONE
 }
 
 send_frame :: proc(sfd: posix.FD, opcode: Opcode, data: []byte) -> posix.Errno {
@@ -136,12 +203,6 @@ send_frame :: proc(sfd: posix.FD, opcode: Opcode, data: []byte) -> posix.Errno {
 	req := encode_client_frame(frame)
 	defer delete(req)
 
-	log.debugf("json (%d): %s", len(data), data)
-	log.debugf("header: %02x", req[:2])
-
-	if posix.send(sfd, raw_data(req), len(req), {}) == -1 {
-		return posix.errno()
-	}
-
-	return .NONE
+	log.debugf("ws send opcode=%v (%d bytes)", opcode, len(data))
+	return send_all(sfd, req[:])
 }
