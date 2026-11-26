@@ -60,10 +60,17 @@ Request :: struct($T: typeid) {
 	payload:      T `json:"payload,omitempty"`,
 }
 
+Data_Ticket_Request :: struct {
+	creator_name: string `json:"creator_name"`,
+	data_ref_id:  string `json:"data_ref_id"`,
+	subprotocol:  string `json:"subprotocol,omitempty"`,
+}
+
 Bootstrap_Payload :: struct {
 	event_scope:          string `json:"event_scope"`,
 	preferred_session_id: string `json:"preferred_session_id,omitempty"`,
 	attach_session_ids:   []string `json:"attach_session_ids,omitempty"`,
+	data_tickets:         []Data_Ticket_Request `json:"data_tickets,omitempty"`,
 }
 
 Attach_Payload :: struct {

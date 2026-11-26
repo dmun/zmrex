@@ -22,7 +22,7 @@ Handshake_Error :: enum {
 	Invalid_Accept,
 }
 
-handshake :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_t, protocol: string) -> Error {
+handshake :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_t, url: string, protocol: string) -> Error {
 	log.info("Performing handshake..")
 
 	if posix.connect(sfd, addr, addr_len) != .OK {
@@ -44,7 +44,7 @@ handshake :: proc(sfd: posix.FD, addr: ^posix.sockaddr, addr_len: posix.socklen_
 		"Sec-WebSocket-Version: 13\r\n" +
 		"Sec-WebSocket-Protocol: %s\r\n" +
 		"\r\n",
-		"/api/control",
+		url,
 		key,
 		protocol,
 	)
